@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WHO Hand Hygiene IoT Dashboard — Cardiff Met</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',sans-serif;background:#0a1628;color:#fff;min-height:100vh;padding:20px}
+h1{text-align:center;color:#02c39a;font-size:1.8em;margin-bottom:5px}
+.sub{text-align:center;color:#5a6a7a;margin-bottom:15px;font-size:.9em}
+.mqtt-bar{text-align:center;margin-bottom:20px;padding:8px;background:#0f2137;border-radius:8px}
+.dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:6px;background:#666;vertical-align:middle}
+.dot.on{background:#02c39a;box-shadow:0 0 6px #02c39a}
+.dot.off{background:#e53935}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.card{background:#0f2137;border-radius:12px;padding:18px;text-align:center;border:1px solid #1a3a5c}
+.card .val{font-size:2.2em;font-weight:bold;color:#02c39a}
+.card .lbl{color:#5a6a7a;font-size:.8em;margin-top:4px}
+.box{background:#0f2137;border-radius:12px;padding:20px;margin-bottom:16px}
+.box h3{color:#02c39a;margin-bottom:12px;font-size:1em}
+table{width:100%;border-collapse:collapse}
+th{background:#028090;padding:9px 12px;text-align:left;font-size:.82em}
+td{padding:9px 12px;border-bottom:1px solid #1a3a5c;font-size:.88em}
+tr:nth-child(even){background:#0a1e35}
+.badge{display:inline-block;padding:2px 10px;border-radius:10px;font-size:.78em;font-weight:bold}
+.ok{background:#1b5e20;color:#69f0ae}
+.pend{background:#333;color:#888}
+.hist-item{background:#0a1e35;border-radius:8px;padding:12px;margin-bottom:8px;border-left:4px solid #02c39a}
+.hist-header{display:flex;justify-content:space-between;margin-bottom:4px}
+.hist-id{color:#02c39a;font-size:.82em}
+.hist-time{color:#5a6a7a;font-size:.78em}
+.hist-details{display:flex;gap:12px;font-size:.82em;color:#aaa;flex-wrap:wrap}
+.bar-bg{background:#1a3a5c;border-radius:6px;height:6px;margin-top:6px}
+.bar-fill{height:100%;background:#02c39a;border-radius:6px;transition:width .5s}
+.live{display:inline-block;background:#e53935;color:#fff;padding:1px 7px;border-radius:4px;font-size:.65em;animation:blink 1s infinite;margin-left:8px;vertical-align:middle}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+</style>
+</head>
+<body>
+<h1>WHO Hand Hygiene IoT Dashboard <span class="live">LIVE</span></h1>
+<p class="sub">Cardiff Metropolitan University — ENG7003 MSc Dissertation 2026<br>
+NVIDIA Jetson Nano 4GB | MediaPipe GPU | XGBoost | Orbbec Gemini 336L</p>
+
+<div class="mqtt-bar">
+    <span class="dot" id="dot"></span>
+    <span id="mqtt-txt">Connecting to HiveMQ broker...</span>
+</div>
+
+<div class="grid">
+    <div class="card"><div class="val" id="c-sessions">0</div><div class="lbl">Total Sessions</div></div>
+    <div class="card"><div class="val" id="c-compliance">0%</div><div class="lbl">Overall Compliance</div></div>
+    <div class="card"><div class="val" id="c-avg">0.0s</div><div class="lbl">Avg Scan Time/Step</div></div>
+    <div class="card"><div class="val" id="c-fps">—</div><div class="lbl">Device FPS</div></div>
+    <div class="card"><div class="val" id="c-steps">0/7</div><div class="lbl">Current Steps</div></div>
+    <div class="card"><div class="val" id="c-last">—</div><div class="lbl">Last Step</div></div>
+</div>
+
+<div class="box">
+    <h3>Current Session — Step Progress</h3>
+    <table>
+        <thead><tr><th>#</th><th>Step Name</th><th>Status</th><th>Scan Time</th><th>Confidence</th></tr></thead>
+        <tbody>
+            <tr id="r1"><td>1</td><td>Palm to palm</td><td><span class="badge pend" id="s1">Pending</span></td><td id="t1">—</td><td id="f1">—</td></tr>
+            <tr id="r2"><td>2</td><td>Right over left</td><td><span class="badge pend" id="s2">Pending</span></td><td id="t2">—</td><td id="f2">—</td></tr>
+            <tr id="r3"><td>3</td><td>Fingers interlaced</td><td><span class="badge pend" id="s3">Pending</span></td><td id="t3">—</td><td id="f3">—</td></tr>
+            <tr id="r4"><td>4</td><td>Backs of fingers</td><td><span class="badge pend" id="s4">Pending</span></td><td id="t4">—</td><td id="f4">—</td></tr>
+            <tr id="r5"><td>5</td><td>Rotational thumbs</td><td><span class="badge pend" id="s5">Pending</span></td><td id="t5">—</td><td id="f5">—</td></tr>
+            <tr id="r6"><td>6</td><td>Fingertip rubbing</td><td><span class="badge pend" id="s6">Pending</span></td><td id="t6">—</td><td id="f6">—</td></tr>
+            <tr id="r7"><td>7</td><td>Wrists</td><td><span class="badge pend" id="s7">Pending</span></td><td id="t7">—</td><td id="f7">—</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="box">
+    <h3>Session History</h3>
+    <div id="hist"><p style="color:#5a6a7a">No sessions yet. Run Jetson system to see live data.</p></div>
+</div>
+
+<script>
+const broker = 'wss://broker.hivemq.com:8884/mqtt';
+const T_SESSION = 'cardiffmet/handhygiene/jetson/session';
+const T_STEP    = 'cardiffmet/handhygiene/jetson/step';
+const T_STATUS  = 'cardiffmet/handhygiene/jetson/status';
+
+let totalSessions=0, compliantSessions=0, allTimes=[], sessions=[];
+
+const client = mqtt.connect(broker, {
+    clientId: 'dash_'+Math.random().toString(16).substr(2,8),
+    clean: true
+});
+
+client.on('connect', ()=>{
+    document.getElementById('dot').className='dot on';
+    document.getElementById('mqtt-txt').textContent='Connected to HiveMQ — receiving live data from Jetson Nano';
+    [T_SESSION,T_STEP,T_STATUS].forEach(t=>client.subscribe(t));
+});
+
+client.on('error', e=>{
+    document.getElementById('dot').className='dot off';
+    document.getElementById('mqtt-txt').textContent='Connection error: '+e.message;
+});
+
+client.on('message', (topic, msg)=>{
+    try {
+        const d = JSON.parse(msg.toString());
+        console.log(topic, d);
+
+        if(topic===T_STEP){
+            const n = d.step_number;
+            // Update status badge
+            const s = document.getElementById('s'+n);
+            if(s){ s.className='badge ok'; s.textContent='Done'; }
+            // Update scan time
+            const t = document.getElementById('t'+n);
+            if(t) t.textContent = d.scan_time+'s';
+            // Update confidence
+            const f = document.getElementById('f'+n);
+            if(f) f.textContent = (d.confidence*100).toFixed(0)+'%';
+            // Update counters
+            document.getElementById('c-steps').textContent = n+'/7';
+            document.getElementById('c-last').textContent = 'S'+n;
+            allTimes.push(parseFloat(d.scan_time));
+            const avg = allTimes.reduce((a,b)=>a+b,0)/allTimes.length;
+            document.getElementById('c-avg').textContent = avg.toFixed(1)+'s';
+        }
+
+        if(topic===T_SESSION){
+            totalSessions++;
+            if(d.compliance===100) compliantSessions++;
+            const rate = Math.round((compliantSessions/totalSessions)*100);
+            document.getElementById('c-sessions').textContent = totalSessions;
+            document.getElementById('c-compliance').textContent = rate+'%';
+            document.getElementById('c-fps').textContent = d.fps||'—';
+            sessions.unshift(d);
+            renderHist();
+            // Keep last session data visible
+            // Reset only when next session starts (handled in T_STATUS)
+            console.log('Session complete - data preserved');
+        }
+
+        if(topic===T_STATUS){
+            document.getElementById('mqtt-txt').textContent=
+                'Device online: '+d.device+' | '+d.location+' | Session: '+d.session_id;
+        }
+    } catch(e){ console.error(e); }
+});
+
+function renderHist(){
+    const h = document.getElementById('hist');
+    h.innerHTML = sessions.slice(0,8).map(s=>`
+        <div class="hist-item">
+            <div class="hist-header">
+                <span class="hist-id">Session: ${s.session_id}</span>
+                <span class="hist-time">${s.timestamp.split('T')[1].split('.')[0]}</span>
+            </div>
+            <div class="hist-details">
+                <span>Steps: ${s.steps_completed}/7</span>
+                <span>Compliance: ${s.compliance}%</span>
+                <span>Avg: ${s.avg_scan_time}s/step</span>
+                <span>Total: ${s.total_time}s</span>
+                <span>FPS: ${s.fps}</span>
+                <span>${s.device}</span>
+            </div>
+            <div class="bar-bg"><div class="bar-fill" style="width:${s.compliance}%"></div></div>
+        </div>`).join('');
+}
+</script>
+</body>
+</html>
